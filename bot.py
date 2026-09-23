@@ -1,66 +1,3 @@
-"""
-Quiz Bowl Discord Bot
-=========================================================
-Question source is pluggable. Default backend is qbreader.org.
-See backends/base.py for the interface, and README.md for how to
-add or switch backends via the QUIZ_BACKEND environment variable.
-
-Slash commands:
-  /qb panel                - posts an interactive panel (categories + difficulty + speed + Start/Stop)
-  /qb start [categories]   - instantly starts a tossup (optional comma-separated categories)
-  /qb speed <preset>       - sets how fast the question reads out in this channel
-  /qb stop                 - stops the round currently running in this channel
-  /qb categories           - lists valid category names
-
-How a round works:
-  1. The bot pulls a random tossup from qbreader filtered by your chosen categories.
-  2. It reveals the question word-by-word in one message (like a real moderator reading it).
-  3. Anyone can hit the 🔴 Buzz button to interrupt the reading. Once you buzz, the reveal
-     freezes, everyone else is locked out, and you have a set window (ANSWER_WINDOW seconds)
-     to type your answer in chat.
-       - Correct  -> you win the tossup.
-       - Wrong / time runs out -> you're "burned" for this question (can't buzz again on it),
-         and the reading resumes from where it paused for everyone else.
-  4. Buzzing before the power mark (qbreader/MODAQ-style literal "(*)" in the question text,
-     when the packet has one) is worth 15 points instead of 10, same as real quiz bowl.
-  5. If nobody gets it, the full question + answer reveal automatically once the clock runs out.
-
-Setup:
-  pip install -r requirements.txt
-  export DISCORD_BOT_TOKEN=your-token-here      (or edit TOKEN below)
-  export QUIZ_BACKEND=qbreader                  (optional, this is the default)
-  python bot.py
-
-Requires the "Message Content Intent" to be enabled for your bot in the
-Discord Developer Portal (needed to read chat answers).
-
-Adding a new backend:
-  See backends/base.py for the interface and backends/qbreader.py for a
-  reference implementation. Register the new class in backends/__init__.py
-  and set QUIZ_BACKEND to its key.
-
-CHANGELOG (this version):
-  - Power detection now looks for qbreader/MODAQ's literal "(*)" marker in the plain
-    question text (the previous HTML-tag-based regex almost never matched real data,
-    and the un-stripped "(*)" was leaking into the revealed text, telegraphing power).
-  - Buzz-button handling is now atomic under session.lock, closing a race where two
-    near-simultaneous buzzes could both "win" before either flipped session.paused.
-  - Discord message edits during the reveal are now batched by clause instead of
-    firing on every single word. Editing the same message 5-10x/second at Fast/Very
-    Fast presets was hitting Discord's per-channel edit rate limit, which is what was
-    showing up as "lag" (edits queuing, then jumping several words at once to catch
-    up). Words are now grouped up to the next comma/period/etc. (capped so a long
-    clause doesn't delay things too long), aiming for roughly one edit every
-    TARGET_EDIT_INTERVAL seconds regardless of reading speed. Word-level timing for
-    buzz/power scoring is unaffected — only how often the message is *redrawn* is
-    batched. A typing indicator is triggered after each edit to keep the channel
-    feeling "live" during the gap until the next one (a much looser rate limit than
-    message edits).
-  - aiohttp session now has an explicit timeout, and both qbreader API calls have proper
-    try/except handling around non-200 responses AND malformed/non-JSON bodies, so a
-    Cloudflare challenge page or a slow response can't silently hang a round.
-"""
-
 import asyncio
 import html
 import os
@@ -77,16 +14,10 @@ from dotenv import load_dotenv
 
 from backends import get_backend_class
 
-load_dotenv()  # no-op if there's no .env file (e.g. in production with real env vars)
-
-# ----------------------------------------------------------------------------
-# Config
-# ----------------------------------------------------------------------------
+load_dotenv()  
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
 
-# Which question backend to use. See backends/__init__.py for the registry
-# and backends/base.py for the interface a new backend needs to implement.
 QUIZ_BACKEND = os.environ.get("QUIZ_BACKEND", "qbreader")
 
 API_TIMEOUT_SECONDS = 10.0
@@ -95,16 +26,8 @@ DEFAULT_WORD_DELAY = 0.30   # seconds between each word being revealed, default 
 ANSWER_WINDOW = 7.0         # seconds a buzzer gets to type their answer
 ANSWER_GRACE_PERIOD = 6.0   # seconds to wait for a buzz after the full question is read
 
-# Instead of a flat "don't edit more often than X seconds" throttle, we batch
-# revealed words together and prefer to push an edit right at a natural clause
-# break (comma/period/etc.), so the reveal reads in phrases rather than
-# mechanical word-count chunks. TARGET_EDIT_INTERVAL is the real-time gap we
-# aim for between edits, on average — it drives how many words get grouped
-# per edit at each reading speed, computed once per round in start_round().
 TARGET_EDIT_INTERVAL = 0.6  # seconds; well clear of Discord's per-channel edit bucket
 
-# Characters that mark a natural place to reveal up to, rather than cutting
-# off mid-phrase.
 CLAUSE_END_CHARS = (",", ".", ";", ":", "!", "?")
 
 SPEED_PRESETS = {
@@ -114,19 +37,10 @@ SPEED_PRESETS = {
     "Very Fast": 0.10,
 }
 
-# Categories and difficulty tiers are backend-specific (different question
-# sources use different taxonomies), so they live on the backend instance
-# as backend.CATEGORIES / backend.DIFFICULTY_TIERS, set once on_ready() runs.
 
 import re  # noqa: E402
 TAG_RE = re.compile(r"<[^>]+>")
 
-# MODAQ/qbreader convention: the power mark is the literal string "(*)",
-# surrounded by spaces, inserted right before the first word after the
-# "in power" clues. Most major quiz bowl question sources follow this
-# convention since it comes from the MODAQ packet format; a backend for a
-# source that marks power differently should translate to this convention
-# in its fetch_random_tossup() before returning the tossup dict.
 POWER_MARK = "(*)"
 
 intents = discord.Intents.default()
@@ -136,10 +50,6 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!qb-unused-", intents=intents)
 
-
-# ----------------------------------------------------------------------------
-# Data structures
-# ----------------------------------------------------------------------------
 
 @dataclass
 class ChannelSettings:
@@ -172,23 +82,16 @@ class QuizSession:
     buzz_revealed_count: int = 0
     buzz_time: float = 0.0
     buzz_timeout_task: Optional[asyncio.Task] = None
-    burned: set = field(default_factory=set)  # user IDs who already tried and missed
+    burned: set = field(default_factory=set)  
 
 
 channel_settings: dict[int, ChannelSettings] = {}
 active_sessions: dict[int, QuizSession] = {}
 http_session: Optional[aiohttp.ClientSession] = None
-backend = None  # set in on_ready(), instance of a QuizBackend subclass
-
+backend = None 
 
 def get_settings(channel_id: int) -> ChannelSettings:
     return channel_settings.setdefault(channel_id, ChannelSettings())
-
-
-# ----------------------------------------------------------------------------
-# Question parsing (generic — works on whatever any backend returns, as long
-# as it follows the format documented in backends/base.py)
-# ----------------------------------------------------------------------------
 
 def parse_tossup_text(raw_question: str):
     """Strip HTML, split into words, and find the word index where the
@@ -199,8 +102,6 @@ def parse_tossup_text(raw_question: str):
     if POWER_MARK in plain:
         before, _, after = plain.partition(POWER_MARK)
         power_word_count = len(before.split())
-        # Strip the marker itself so it never gets revealed as a "word" and
-        # never telegraphs the power cutoff to whoever is reading along.
         plain = f"{before.strip()} {after.strip()}".strip()
 
     words = plain.split()
@@ -214,32 +115,26 @@ def answer_plain_text(session: QuizSession) -> str:
 def make_header(session: QuizSession) -> str:
     category = session.tossup.get("category", "Unknown")
     subcategory = session.tossup.get("subcategory", "")
-    header = f"🎯 **Quiz Bowl Tossup** — *{category}"
+    header = f" **Tossup**: *{category}"
     if subcategory and subcategory != category:
         header += f" / {subcategory}"
     header += "*\n\n_ _"
     return header
 
 
-# ----------------------------------------------------------------------------
-# Buzz button UI
-# ----------------------------------------------------------------------------
 
 class BuzzView(discord.ui.View):
     def __init__(self, channel_id: int):
         super().__init__(timeout=None)
         self.channel_id = channel_id
 
-    @discord.ui.button(label="🔴 Buzz!", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Buzz", style=discord.ButtonStyle.danger)
     async def buzz_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         session = active_sessions.get(self.channel_id)
         if session is None or session.finished:
             await interaction.response.send_message("There's no round running here.", ephemeral=True)
             return
 
-        # Everything that reads-then-writes session.paused/buzzed_by must happen
-        # atomically, or two near-simultaneous buzzes can both pass the checks
-        # before either one flips session.paused to True.
         async with session.lock:
             if interaction.user.id in session.burned:
                 await interaction.response.send_message(
@@ -259,7 +154,6 @@ class BuzzView(discord.ui.View):
             session.buzz_revealed_count = session.revealed_count
             session.buzz_time = time.monotonic()
 
-        # UI/network side effects can happen outside the lock.
         button.disabled = True
         button.label = f"🔴 {interaction.user.display_name} is answering…"
         try:
@@ -292,7 +186,7 @@ async def buzz_timeout(session: QuizSession):
 
     async with session.lock:
         if session.finished or not session.paused:
-            return  # already resolved by an answer
+            return  
         await resolve_buzz(session, correct=False, timed_out=True)
 
 
@@ -304,7 +198,6 @@ async def resolve_buzz(session: QuizSession, correct: bool, timed_out: bool = Fa
         await end_round_with_winner(session)
         return
 
-    # Wrong answer or timed out: burn this user, resume reveal for everyone else
     if buzzer:
         session.burned.add(buzzer.id)
         note = "⌛ Time's up!" if timed_out else "❌ Incorrect."
@@ -322,10 +215,6 @@ async def resolve_buzz(session: QuizSession, correct: bool, timed_out: bool = Fa
 
     session.resume_event.set()
 
-
-# ----------------------------------------------------------------------------
-# Core round logic
-# ----------------------------------------------------------------------------
 
 async def start_round(channel: discord.abc.Messageable, channel_id: int):
     if channel_id in active_sessions and not active_sessions[channel_id].finished:
@@ -350,10 +239,6 @@ async def start_round(channel: discord.abc.Messageable, channel_id: int):
         await channel.send("Got an empty question from the API, try again with `/qb start`.")
         return
 
-    # How many words fit in TARGET_EDIT_INTERVAL of real time at this reading
-    # speed. max_words_per_edit is a hard cap (in case a clause runs long);
-    # min_words_per_edit lets a clause break end an edit slightly early
-    # rather than always waiting for the max.
     max_words_per_edit = max(1, round(TARGET_EDIT_INTERVAL / settings.word_delay))
     min_words_per_edit = max(1, max_words_per_edit // 2)
 
@@ -378,7 +263,6 @@ async def start_round(channel: discord.abc.Messageable, channel_id: int):
 
 
 async def wait_while_paused(session: QuizSession):
-    """Blocks here whenever someone has buzzed, until the buzz is resolved."""
     while session.paused and not session.finished:
         session.resume_event.clear()
         try:
@@ -402,8 +286,6 @@ async def run_reveal(session: QuizSession):
                 continue
 
             i += 1
-            # revealed_count updates every word regardless of whether we push
-            # a Discord edit this tick — buzz/power timing must stay word-accurate.
             session.revealed_count = i
             words_since_edit += 1
 
@@ -439,7 +321,6 @@ async def run_reveal(session: QuizSession):
                         pass
                 words_since_edit = 0
 
-            # sleep in short chunks so a buzz can interrupt promptly
             slept = 0.0
             while slept < session.word_delay:
                 if session.finished or session.paused:
@@ -483,10 +364,6 @@ async def run_reveal(session: QuizSession):
     except asyncio.CancelledError:
         pass
     except Exception as exc:
-        # Anything unexpected here used to leave the message/button frozen
-        # forever with active_sessions already cleared out from under it
-        # (exactly the "There's no round running here" bug). Now it's
-        # visible and the round ends cleanly instead of silently hanging.
         print(f"[quizbowl_bot] run_reveal crashed for channel {session.channel_id}: {exc!r}")
         session.finished = True
         try:
@@ -494,8 +371,7 @@ async def run_reveal(session: QuizSession):
                 session.view.lock_button("Round errored — see logs")
                 await session.message.edit(view=session.view)
             await session.message.channel.send(
-                "⚠️ Something went wrong running that round and it had to stop. "
-                "Sorry — try `/qb start` again."
+                "Something went wrong running that round and it had to stop. "
             )
         except discord.HTTPException:
             pass
@@ -553,11 +429,6 @@ async def stop_round(channel: discord.abc.Messageable, channel_id: int):
             pass
     active_sessions.pop(channel_id, None)
     await channel.send(f"🛑 Round stopped. The answer was: **{answer_plain_text(session)}**")
-
-
-# ----------------------------------------------------------------------------
-# Message handling (only used to read the buzzer's typed answer)
-# ----------------------------------------------------------------------------
 
 @bot.event
 async def on_message(message: discord.Message):
