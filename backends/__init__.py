@@ -1,4 +1,3 @@
-"""Registry of available quiz backends. Add new backends here."""
 
 from .qbreader import QBReaderBackend
 
