@@ -30,6 +30,5 @@ How a round works:
        - Correct  -> you win the tossup.
        - Wrong / time runs out -> you're "burned" for this question (can't buzz again on it),
          and the reading resumes from where it paused for everyone else.
-  4. Buzzing before the power mark (qbreader/MODAQ-style literal "(*)" in the question text,
-     when the packet has one) is worth 15 points instead of 10, same as real quiz bowl.
+  4. Buzzing before the power mark, is worth 15 points instead of 10, same as real quiz bowl.
   5. If nobody gets it, the full question + answer reveal automatically once the clock runs out.
