@@ -22,13 +22,8 @@ class QuizBackend(ABC):
 
     @abstractmethod
     async def fetch_random_tossup(self, categories: set, difficulties: set) -> Optional[dict]:
-        """Return one tossup dict (see module docstring for the shape), or
-        None if a tossup couldn't be fetched (network error, empty result,
-        etc). Never raise — the bot expects failures to come back as None."""
         ...
 
     @abstractmethod
     async def check_answer(self, answerline: str, given_answer: str) -> dict:
-        """Return {"directive": "accept" | "reject" | "prompt", ...}. Never
-        raise — on failure, fall back to a local best-effort check."""
         ...
