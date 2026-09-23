@@ -1,28 +1,3 @@
-"""
-Backend interface for quiz bowl question sources.
-
-To add a new backend:
-  1. Create backends/yourname.py
-  2. Subclass QuizBackend, set CATEGORIES / DIFFICULTY_TIERS, and implement
-     fetch_random_tossup() and check_answer()
-  3. Register it in backends/__init__.py's BACKENDS dict
-  4. Run the bot with QUIZ_BACKEND=yourname
-
-A tossup dict returned by fetch_random_tossup() must have at least:
-  "question" - the tossup text. May contain HTML tags (bot.py strips them) and,
-               if power is supported, the literal marker "(*)" placed right after
-               the last word of the power clues (MODAQ/qbreader convention).
-  "answer"   - the answerline. May contain HTML tags (bot.py strips them).
-Optional keys "category" / "subcategory" are shown in the round header if present.
-
-check_answer() must return a dict with a "directive" key: "accept", "reject", or
-"prompt". For "prompt", also include a "directedPrompt" string with follow-up
-text to show the player (used for answerlines that need more specificity).
-If your source has no answer-checking endpoint, do a normalized string-contains
-check locally and return "accept"/"reject" — see qbreader.py's fallback for
-a minimal example.
-"""
-
 from abc import ABC, abstractmethod
 from typing import Optional
 
