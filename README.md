@@ -11,7 +11,7 @@ Tournament-style.
 - and more!
 
 Question source is pluggable. Default backend is qbreader.org.
-See backends/base.py for the interface, and README.md for how to
+See backends/base.py for the interface for how to
 add or switch backends via the QUIZ_BACKEND environment variable.
 
 Slash commands:
